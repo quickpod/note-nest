@@ -1,0 +1,3 @@
+# NoteNest runtime deps — permissive/weak-copyleft only, no AGPL/proprietary.
+Markdown>=3.5
+Whoosh>=2.7

@@ -1,0 +1,13 @@
+{
+  "slug": "note-nest",
+  "name": "NoteNest",
+  "tagline": "A local Markdown knowledge base with backlinks, tags and full-text search.",
+  "categorySlug": "note-taking",
+  "license": "Apache-2.0",
+  "description": "Write notes in Markdown with live preview, link notes together with [[wiki-links]] and see backlinks, organize with tags, and find anything with instant full-text search. A local graph connects your ideas. An Obsidian-style second brain that stores plain files you own.",
+  "aiStack": "Python (tkinter + CLI), Markdown, Whoosh",
+  "platforms": [
+    "windows"
+  ],
+  "buildEntry": "note_nest_app.py"
+}
