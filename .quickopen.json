@@ -7,7 +7,8 @@
   "description": "Write notes in Markdown with live preview, link notes together with [[wiki-links]] and see backlinks, organize with tags, and find anything with instant full-text search. A local graph connects your ideas. An Obsidian-style second brain that stores plain files you own.",
   "aiStack": "Python (tkinter + CLI), Markdown, Whoosh",
   "platforms": [
-    "windows"
+    "windows",
+    "linux"
   ],
   "buildEntry": "note_nest_app.py"
 }
