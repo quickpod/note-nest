@@ -20,8 +20,10 @@ jobs:
           pyinstaller --onefile --windowed --name NoteNest
           --icon note-nest.ico
           --version-file packaging/version.txt
+          --hidden-import notenest.__main__
           --add-data "note-nest.ico;."
           --collect-submodules whoosh
+          --collect-all customtkinter
           note_nest_app.py
       - name: Stage installer inputs
         shell: pwsh
@@ -41,4 +43,10 @@ jobs:
           path: |
             dist/NoteNest.exe
             packaging/dist/NoteNest-Setup.exe
+          if-no-files-found: error
+      - name: Upload staging (for signed repack)
+        uses: actions/upload-artifact@v4
+        with:
+          name: note-nest-staging
+          path: packaging/staging
           if-no-files-found: error

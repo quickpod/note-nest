@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-r"""NoteNest -- a pure-stdlib tkinter GUI on top of the ``notenest`` API.
+r"""NoteNest -- an Aura (QuickOpen design system) GUI on top of the ``notenest`` API.
 
-A single main window with three panes:
+A single Aura window with two sidebar sections:
 
-  * **left**  -- a search box, a tag filter and the note list, plus New/Delete;
-  * **centre** -- the Markdown editor (autosaves as you type);
-  * **right** -- a live, readable preview of the rendered Markdown, and a tabbed
-    panel of backlinks + outgoing links.  Wiki-links in the preview are
-    clickable and navigate (creating the target note if it does not exist yet).
+  * **Notes** -- the writing workspace: a three-pane splitter with a search +
+    tag-filter + note list on the left, the Markdown **editor** (autosaves as
+    you type) in the centre, and a live rendered **preview** plus a tabbed
+    backlinks / outgoing-links panel on the right.  Wiki-links in the preview
+    are clickable and navigate (creating the target note if it does not exist).
+  * **About** -- app / licence info.
 
-Design goals mirror the QuickOpen house style:
-  * pure standard-library tkinter/ttk -- NO third-party GUI deps.  Dark mode is
-    a ttk-style + palette swap.
+Design goals baked in here (mirrors the QuickOpen house style):
+  * built on the vendored ``notenest/aura.py`` design system, which layers the
+    quickopen.ai look (deep space + light) over CustomTkinter.  Runtime deps:
+    ``customtkinter`` (+ ``darkdetect``) — declared in requirements.txt; the
+    PyInstaller build adds ``--collect-all customtkinter``.
   * Importing this module does nothing.  Only :func:`main` builds a root window,
-    and it degrades gracefully (prints a note, returns 0) with no display.
+    and it degrades gracefully (prints a note, returns 0) with no display or
+    with customtkinter missing.
   * Frozen-exe safe: bundled assets are resolved via ``sys._MEIPASS`` / the exe
     directory when ``sys.frozen`` is set -- never ``__file__``.
   * Every note operation calls the tested core library (vault/links/render/
     search); the search index is (re)built on a background thread and marshalled
-    back with ``self.after``.  Failures show inline -- never a raw traceback.
+    back with ``self.after``.  Failures show in the Aura status bar -- never a
+    raw traceback.
 
 100% AI-built, open source, published on QuickOpen (quickopen.ai).
 """
@@ -29,31 +34,14 @@ import os
 import sys
 import threading
 
-# NOTE: tkinter is imported lazily inside main()/build_app so that merely
-# importing this module (packaging, headless CI) never fails.
+# NOTE: tkinter/customtkinter are imported lazily inside main()/build_app so
+# that merely importing this module (packaging, headless CI) never fails.
 
 APP_NAME = "NoteNest"
 APP_VERSION = "1.0.0"
 WINDOW_TITLE = "NoteNest — by QuickOpen (quickopen.ai)"
 PROJECT_URL = "https://quickopen.ai"
-
-# ---- colour palettes (mirror the QuickOpen palette) -------------------------
-PALETTES = {
-    "light": {
-        "bg": "#f5f7fa", "surface": "#ffffff", "text": "#141820",
-        "muted": "#5b6472", "primary": "#2f5fe0", "primary_hi": "#2450c8",
-        "entry": "#ffffff", "border": "#d5dae2", "sel": "#2f5fe0",
-        "sel_fg": "#ffffff", "trough": "#e2e7ef", "ok": "#1f7a3d",
-        "err": "#c0392b", "link": "#2450c8", "code_bg": "#eef1f6",
-    },
-    "dark": {
-        "bg": "#0f1115", "surface": "#1a1e24", "text": "#f1f3f7",
-        "muted": "#9aa4b2", "primary": "#5b86f7", "primary_hi": "#7098ff",
-        "entry": "#1a1e24", "border": "#2a2f38", "sel": "#5b86f7",
-        "sel_fg": "#0f1115", "trough": "#2a2f38", "ok": "#5bd68a",
-        "err": "#ff6b5e", "link": "#7098ff", "code_bg": "#12161c",
-    },
-}
+ACCENT = "#17914b"      # publish/specs/note-nest.json "accent": [23, 145, 75]
 
 
 # ---------------------------------------------------------------------------
@@ -99,22 +87,30 @@ def open_with_default_app(path):
 
 
 # ---------------------------------------------------------------------------
-# The app (built lazily; tkinter imported only inside build_app/main)
+# The app (built lazily; tkinter/customtkinter imported only inside build_app)
 # ---------------------------------------------------------------------------
 def build_app():
-    """Construct and return the App class bound to a live tkinter import.
+    """Construct and return the App class bound to live GUI imports.
 
-    Kept inside a function so this module imports cleanly without a display.
+    Kept inside a function so this module imports cleanly without a display
+    (and without customtkinter installed).
     """
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox, simpledialog
     from html.parser import HTMLParser
+    import customtkinter as ctk
 
-    from . import guiconfig, links, render, search, vault
+    from . import aura, guiconfig, links, render, search, vault
     from .errors import NoteNestError
 
-    FONT = "Segoe UI"
-    MONO = "Consolas"
+    # Readable families in both worlds; DejaVu is the Linux fallback so the
+    # editor/preview never render as tofu under Xvfb.
+    UI_FAMILY = "Segoe UI" if os.name == "nt" else "DejaVu Sans"
+    MONO_FAMILY = "Consolas" if os.name == "nt" else "DejaVu Sans Mono"
+
+    # (light, dark) palette pairs so CustomTkinter auto-flips these frames with
+    # the theme (a single aura.P(...) value would freeze at build-time theme).
+    pair = aura._pair
 
     # -- preview: render HTML into a styled tk.Text -----------------------
     class _PreviewParser(HTMLParser):
@@ -216,26 +212,27 @@ def build_app():
             self._insert(data)
 
     # -- the main window --------------------------------------------------
-    class App(tk.Tk):
+    class App(aura.AuraApp):
         AUTOSAVE_MS = 700
 
         def __init__(self, notebook=None):
-            super().__init__()
-            self.title(WINDOW_TITLE)
-            self.geometry("1180x720")
-            self.minsize(920, 560)
+            super().__init__(
+                title=WINDOW_TITLE, app_name=APP_NAME, accent=ACCENT,
+                theme=guiconfig.get_theme(),
+                icon_png=asset_path("note-nest.png"), version=APP_VERSION,
+                tagline="offline notes",
+                on_theme_change=guiconfig.set_theme,
+                size=(1180, 720), min_size=(920, 560))
 
-            self.theme = guiconfig.get_theme()
             self.root_dir = os.path.abspath(
                 notebook or guiconfig.get_notebook()
                 or guiconfig.default_notebook_dir())
-            self._tracked = []          # (tk_widget, role) for manual re-theming
             self._img_refs = []
             self._busy = False
             self._current = None        # current note name
             self._dirty = False
             self._autosave_job = None
-            self._preview_job = None
+            self._filter_job = None
             self._link_seq = 0
 
             try:
@@ -246,8 +243,9 @@ def build_app():
 
             self._set_icon()
             self._build_menu()
-            self._build_layout()
-            self._apply_theme()
+            self.add_section("notes", "Notes", "✎", self._build_notes)
+            self.add_section("about", "About", "ℹ", self._build_about)
+            self.show("notes")
             self.protocol("WM_DELETE_WINDOW", self._on_close)
             self.after(50, self._startup)
 
@@ -255,7 +253,7 @@ def build_app():
         def _set_icon(self):
             try:
                 ico = asset_path("note-nest.ico")
-                if ico:
+                if ico and os.name == "nt":
                     self.iconbitmap(ico)
                     return
             except Exception:
@@ -269,119 +267,7 @@ def build_app():
             except Exception:
                 pass  # icon is cosmetic; never block launch
 
-        # ---- theming
-        def track(self, widget, role):
-            self._tracked.append((widget, role))
-
-        def _pal(self):
-            return PALETTES[self.theme]
-
-        def _apply_theme(self):
-            p = self._pal()
-            style = ttk.Style(self)
-            try:
-                style.theme_use("clam")
-            except Exception:
-                pass
-            self.configure(bg=p["bg"])
-            style.configure(".", background=p["bg"], foreground=p["text"],
-                            fieldbackground=p["entry"], bordercolor=p["border"],
-                            font=(FONT, 10))
-            style.configure("TFrame", background=p["bg"])
-            style.configure("Sidebar.TFrame", background=p["surface"])
-            style.configure("TLabel", background=p["bg"], foreground=p["text"])
-            style.configure("Muted.TLabel", background=p["bg"], foreground=p["muted"])
-            style.configure("Header.TLabel", background=p["bg"], foreground=p["text"],
-                            font=(FONT, 14, "bold"))
-            style.configure("Brand.TLabel", background=p["surface"],
-                            foreground=p["text"], font=(FONT, 12, "bold"))
-            style.configure("Status.TLabel", background=p["surface"],
-                            foreground=p["muted"])
-            style.configure("TButton", background=p["surface"], foreground=p["text"],
-                            bordercolor=p["border"], focuscolor=p["surface"],
-                            padding=(10, 5))
-            style.map("TButton",
-                      background=[("active", p["trough"]), ("disabled", p["bg"])],
-                      foreground=[("disabled", p["muted"])])
-            style.configure("Accent.TButton", background=p["primary"],
-                            foreground="#ffffff", padding=(12, 6))
-            style.map("Accent.TButton",
-                      background=[("active", p["primary_hi"]),
-                                  ("disabled", p["border"])],
-                      foreground=[("disabled", p["muted"])])
-            style.configure("Toggle.TButton", background=p["surface"],
-                            foreground=p["text"], padding=(8, 4))
-            for name in ("TEntry", "TSpinbox"):
-                style.configure(name, fieldbackground=p["entry"], foreground=p["text"],
-                                insertcolor=p["text"], bordercolor=p["border"])
-            style.configure("TCombobox", fieldbackground=p["entry"],
-                            foreground=p["text"], background=p["surface"],
-                            arrowcolor=p["text"])
-            style.map("TCombobox", fieldbackground=[("readonly", p["entry"])],
-                      foreground=[("readonly", p["text"])])
-            style.configure("TNotebook", background=p["bg"], bordercolor=p["border"])
-            style.configure("TNotebook.Tab", background=p["surface"],
-                            foreground=p["muted"], padding=(10, 5))
-            style.map("TNotebook.Tab",
-                      background=[("selected", p["bg"])],
-                      foreground=[("selected", p["text"])])
-            style.configure("TScrollbar", background=p["surface"],
-                            troughcolor=p["bg"], bordercolor=p["border"],
-                            arrowcolor=p["text"])
-            style.configure("TSeparator", background=p["border"])
-            style.configure("TPanedwindow", background=p["bg"])
-
-            # manually re-colour raw tk widgets (Listbox / Text)
-            for widget, role in list(self._tracked):
-                try:
-                    if role == "listbox":
-                        widget.configure(bg=p["surface"], fg=p["text"],
-                                         selectbackground=p["primary"],
-                                         selectforeground=p["sel_fg"],
-                                         highlightthickness=1,
-                                         highlightbackground=p["border"],
-                                         borderwidth=0)
-                    elif role == "editor":
-                        widget.configure(bg=p["surface"], fg=p["text"],
-                                         insertbackground=p["text"],
-                                         selectbackground=p["primary"],
-                                         selectforeground=p["sel_fg"],
-                                         highlightthickness=1,
-                                         highlightbackground=p["border"],
-                                         borderwidth=0, font=(MONO, 11))
-                    elif role == "preview":
-                        widget.configure(bg=p["surface"], fg=p["text"],
-                                         insertbackground=p["text"],
-                                         selectbackground=p["primary"],
-                                         highlightthickness=1,
-                                         highlightbackground=p["border"],
-                                         borderwidth=0, font=(FONT, 11))
-                        self._configure_preview_tags(widget)
-                except Exception:
-                    pass
-
-        def _configure_preview_tags(self, w):
-            p = self._pal()
-            w.tag_configure("h1", font=(FONT, 18, "bold"), spacing1=6, spacing3=4)
-            w.tag_configure("h2", font=(FONT, 15, "bold"), spacing1=5, spacing3=3)
-            w.tag_configure("h3", font=(FONT, 13, "bold"), spacing1=4, spacing3=2)
-            w.tag_configure("bold", font=(FONT, 11, "bold"))
-            w.tag_configure("italic", font=(FONT, 11, "italic"))
-            w.tag_configure("code", font=(MONO, 10), background=p["code_bg"])
-            w.tag_configure("pre", font=(MONO, 10), background=p["code_bg"],
-                            lmargin1=12, lmargin2=12)
-            w.tag_configure("quote", foreground=p["muted"], lmargin1=12, lmargin2=12)
-            w.tag_configure("link", foreground=p["link"], underline=1)
-
-        def toggle_theme(self):
-            self.theme = "dark" if self.theme == "light" else "light"
-            guiconfig.set_theme(self.theme)
-            self._apply_theme()
-            self._theme_btn.configure(
-                text="☀ Light mode" if self.theme == "dark" else "🌙 Dark mode")
-            self._refresh_preview()
-
-        # ---- menu
+        # ---- menu (native menus stay; theme also lives in the sidebar toggle)
         def _build_menu(self):
             bar = tk.Menu(self)
             filem = tk.Menu(bar, tearoff=0)
@@ -397,11 +283,14 @@ def build_app():
             bar.add_cascade(label="File", menu=filem)
 
             viewm = tk.Menu(bar, tearoff=0)
-            viewm.add_command(label="Toggle dark mode", command=self.toggle_theme)
+            viewm.add_command(
+                label="Toggle dark mode",
+                command=lambda: self.set_theme(
+                    "light" if self.theme == "dark" else "dark"))
             bar.add_cascade(label="View", menu=viewm)
 
             helpm = tk.Menu(bar, tearoff=0)
-            helpm.add_command(label="About", command=self._about)
+            helpm.add_command(label="About", command=lambda: self.show("about"))
             helpm.add_command(label="Open project page (quickopen.ai)",
                               command=lambda: open_with_default_app(PROJECT_URL))
             bar.add_cascade(label="Help", menu=helpm)
@@ -409,150 +298,177 @@ def build_app():
             self.bind_all("<Control-n>", lambda e: self._new_note())
             self.bind_all("<Control-s>", lambda e: (self._save_current(), "break"))
 
-        # ---- layout
-        def _build_layout(self):
-            top = ttk.Frame(self, style="Sidebar.TFrame", padding=(12, 8))
-            top.pack(fill="x", side="top")
-            ttk.Label(top, text="NoteNest", style="Brand.TLabel").pack(side="left")
-            ttk.Label(top, style="Status.TLabel",
-                      text="  offline · open source · by QuickOpen").pack(side="left")
-            self._theme_btn = ttk.Button(
-                top, style="Toggle.TButton", command=self.toggle_theme,
-                text="☀ Light mode" if self.theme == "dark" else "🌙 Dark mode")
-            self._theme_btn.pack(side="right")
-            self._nb_btn = ttk.Button(top, style="Toggle.TButton",
-                                      command=self._open_notebook, text="📁 Notebook")
-            self._nb_btn.pack(side="right", padx=(0, 6))
-
-            panes = ttk.Panedwindow(self, orient="horizontal")
+        # =================================================================
+        # Notes section — the three-pane workspace
+        # =================================================================
+        def _build_notes(self, frame):
+            panes = ttk.Panedwindow(frame, orient="horizontal")
             panes.pack(fill="both", expand=True)
 
-            # ---- left: search + tag filter + note list
-            left = ttk.Frame(panes, style="Sidebar.TFrame", padding=8)
+            # ---- left: notebook controls + search + tag filter + note list
+            left = ttk.Frame(panes)
             panes.add(left, weight=0)
-            ttk.Label(left, text="Search", style="Muted.TLabel").pack(anchor="w")
-            self.search_var = tk.StringVar()
-            se = ttk.Entry(left, textvariable=self.search_var)
-            se.pack(fill="x", pady=(0, 6))
-            self.search_var.trace_add("write", lambda *_: self._schedule_filter())
 
-            row = ttk.Frame(left, style="Sidebar.TFrame")
-            row.pack(fill="x", pady=(0, 6))
-            ttk.Label(row, text="Tag", style="Muted.TLabel").pack(side="left")
+            nb_row = ctk.CTkFrame(left, fg_color="transparent")
+            nb_row.pack(fill="x", pady=(0, 8))
+            aura.SectionLabel(nb_row, "Notebook").pack(side="left")
+            aura.AuraButton(nb_row, "Open…", kind="ghost", height=28,
+                            command=self._open_notebook).pack(side="right")
+            self._nb_caption = aura.Caption(left, self._notebook_label())
+            self._nb_caption.pack(anchor="w", pady=(0, 10))
+
+            aura.SectionLabel(left, "Search").pack(anchor="w")
+            # no textvariable: CTkEntry placeholders only work without one
+            self.search_entry = aura.AuraEntry(
+                left, placeholder="Search names and contents…")
+            self.search_entry.pack(fill="x", pady=(2, 8))
+            self.search_entry.bind("<KeyRelease>",
+                                   lambda _e: self._schedule_filter())
+
+            tag_row = ctk.CTkFrame(left, fg_color="transparent")
+            tag_row.pack(fill="x", pady=(0, 8))
+            aura.SectionLabel(tag_row, "Tag").pack(side="left", padx=(0, 8))
             self.tag_var = tk.StringVar(value="(all)")
-            self.tag_combo = ttk.Combobox(row, textvariable=self.tag_var,
-                                          state="readonly", width=16)
-            self.tag_combo.pack(side="left", fill="x", expand=True, padx=(6, 0))
-            self.tag_combo.bind("<<ComboboxSelected>>",
-                                lambda e: self._refresh_notes())
+            self.tag_combo = aura.AuraCombo(
+                tag_row, variable=self.tag_var, values=["(all)"],
+                state="readonly", command=lambda _v: self._refresh_notes())
+            self.tag_combo.pack(side="left", fill="x", expand=True)
 
-            self.note_list = tk.Listbox(left, activestyle="none",
-                                        selectmode="browse", exportselection=False,
-                                        width=26)
-            self.note_list.pack(fill="both", expand=True, pady=(0, 6))
+            list_wrap = ctk.CTkFrame(left, fg_color=pair("surface"),
+                                     corner_radius=10,
+                                     border_width=1, border_color=pair("border"))
+            list_wrap.pack(fill="both", expand=True, pady=(0, 8))
+            self.note_list = tk.Listbox(list_wrap, activestyle="none",
+                                        selectmode="browse",
+                                        exportselection=False, width=26,
+                                        font=(UI_FAMILY, 10))
+            nsb = aura.AuraScrollbar(list_wrap, command=self.note_list.yview)
+            self.note_list.configure(yscrollcommand=nsb.set)
+            nsb.pack(side="right", fill="y", padx=(0, 4), pady=4)
+            self.note_list.pack(side="left", fill="both", expand=True,
+                                padx=(6, 0), pady=6)
             self.note_list.bind("<<ListboxSelect>>", self._on_note_select)
-            self.track(self.note_list, "listbox")
+            aura.track(self.note_list, "listbox")
 
-            btns = ttk.Frame(left, style="Sidebar.TFrame")
+            btns = ctk.CTkFrame(left, fg_color="transparent")
             btns.pack(fill="x")
-            ttk.Button(btns, text="New", style="Accent.TButton",
-                       command=self._new_note).pack(side="left")
-            ttk.Button(btns, text="Delete",
-                       command=self._delete_note).pack(side="left", padx=6)
+            aura.AuraButton(btns, "New note", kind="primary",
+                            command=self._new_note).pack(side="left")
+            aura.AuraButton(btns, "Delete", kind="danger",
+                            command=self._delete_note).pack(side="left",
+                                                            padx=(8, 0))
 
             # ---- centre: editor
-            centre = ttk.Frame(panes, style="TFrame", padding=(8, 8))
+            centre = ttk.Frame(panes)
             panes.add(centre, weight=3)
-            head = ttk.Frame(centre, style="TFrame")
-            head.pack(fill="x")
-            self.title_lbl = ttk.Label(head, text="No note selected",
-                                       style="Header.TLabel")
+            head = ctk.CTkFrame(centre, fg_color="transparent")
+            head.pack(fill="x", pady=(0, 8))
+            self.title_lbl = aura.Heading(head, "No note selected")
             self.title_lbl.pack(side="left")
-            ttk.Button(head, text="Save", command=self._save_current).pack(side="right")
-            ed_box = ttk.Frame(centre, style="TFrame")
-            ed_box.pack(fill="both", expand=True, pady=(6, 0))
-            self.editor = tk.Text(ed_box, wrap="word", undo=True)
-            esb = ttk.Scrollbar(ed_box, orient="vertical", command=self.editor.yview)
+            aura.AuraButton(head, "Save", kind="secondary", height=30,
+                            command=self._save_current).pack(side="right")
+
+            ed_wrap = ctk.CTkFrame(centre, fg_color=pair("field"),
+                                   corner_radius=10,
+                                   border_width=1, border_color=pair("border"))
+            ed_wrap.pack(fill="both", expand=True)
+            self.editor = tk.Text(ed_wrap, wrap="word", undo=True,
+                                  relief="flat", padx=10, pady=8,
+                                  font=(MONO_FAMILY, 11))
+            esb = aura.AuraScrollbar(ed_wrap, command=self.editor.yview)
             self.editor.configure(yscrollcommand=esb.set)
-            esb.pack(side="right", fill="y")
-            self.editor.pack(side="left", fill="both", expand=True)
-            self.track(self.editor, "editor")
+            esb.pack(side="right", fill="y", padx=(0, 4), pady=4)
+            self.editor.pack(side="left", fill="both", expand=True,
+                             padx=(4, 0), pady=4)
+            aura.track(self.editor, "text")
             self.editor.bind("<<Modified>>", self._on_editor_modified)
 
-            # ---- right: preview + backlinks/links tabs
-            right = ttk.Frame(panes, style="TFrame", padding=(8, 8))
+            # ---- right: preview + backlinks/outgoing tabs
+            right = ttk.Frame(panes)
             panes.add(right, weight=2)
-            ttk.Label(right, text="Preview", style="Muted.TLabel").pack(anchor="w")
-            pv_box = ttk.Frame(right, style="TFrame")
-            pv_box.pack(fill="both", expand=True, pady=(2, 6))
-            self.preview = tk.Text(pv_box, wrap="word", state="disabled",
-                                   cursor="arrow")
-            psb = ttk.Scrollbar(pv_box, orient="vertical", command=self.preview.yview)
+            aura.SectionLabel(right, "Preview").pack(anchor="w", pady=(0, 4))
+            pv_wrap = ctk.CTkFrame(right, fg_color=pair("field"),
+                                   corner_radius=10,
+                                   border_width=1, border_color=pair("border"))
+            pv_wrap.pack(fill="both", expand=True, pady=(0, 8))
+            self.preview = tk.Text(pv_wrap, wrap="word", state="disabled",
+                                   cursor="arrow", relief="flat",
+                                   padx=10, pady=8, font=(UI_FAMILY, 11))
+            psb = aura.AuraScrollbar(pv_wrap, command=self.preview.yview)
             self.preview.configure(yscrollcommand=psb.set)
-            psb.pack(side="right", fill="y")
-            self.preview.pack(side="left", fill="both", expand=True)
-            self.track(self.preview, "preview")
+            psb.pack(side="right", fill="y", padx=(0, 4), pady=4)
+            self.preview.pack(side="left", fill="both", expand=True,
+                              padx=(4, 0), pady=4)
+            aura.track(self.preview, "text")
+            self._configure_preview_tags(self.preview)
 
             tabs = ttk.Notebook(right, height=180)
             tabs.pack(fill="x")
-            bl_frame = ttk.Frame(tabs, style="TFrame")
+            bl_frame = ttk.Frame(tabs)
             self.backlinks_list = tk.Listbox(bl_frame, activestyle="none",
-                                             exportselection=False, height=7)
+                                             exportselection=False, height=7,
+                                             font=(UI_FAMILY, 10))
             self.backlinks_list.pack(fill="both", expand=True)
-            self.backlinks_list.bind("<Double-Button-1>",
-                                     lambda e: self._open_from_list(self.backlinks_list))
-            self.track(self.backlinks_list, "listbox")
-            tabs.add(bl_frame, text="Backlinks")
+            self.backlinks_list.bind(
+                "<Double-Button-1>",
+                lambda e: self._open_from_list(self.backlinks_list))
+            aura.track(self.backlinks_list, "listbox")
+            tabs.add(bl_frame, text=aura.spaced("Backlinks"))
 
-            out_frame = ttk.Frame(tabs, style="TFrame")
+            out_frame = ttk.Frame(tabs)
             self.links_list = tk.Listbox(out_frame, activestyle="none",
-                                         exportselection=False, height=7)
+                                         exportselection=False, height=7,
+                                         font=(UI_FAMILY, 10))
             self.links_list.pack(fill="both", expand=True)
-            self.links_list.bind("<Double-Button-1>",
-                                 lambda e: self._open_from_list(self.links_list))
-            self.track(self.links_list, "listbox")
-            tabs.add(out_frame, text="Outgoing links")
+            self.links_list.bind(
+                "<Double-Button-1>",
+                lambda e: self._open_from_list(self.links_list))
+            aura.track(self.links_list, "listbox")
+            tabs.add(out_frame, text=aura.spaced("Outgoing links"))
 
-            # ---- bottom: inline status / error bar
-            bar = ttk.Frame(self, style="Sidebar.TFrame", padding=(12, 6))
-            bar.pack(fill="x", side="bottom")
-            self.status_lbl = ttk.Label(bar, text="Ready", style="Status.TLabel",
-                                        width=18, anchor="w")
-            self.status_lbl.pack(side="left")
-            self.msg_lbl = ttk.Label(bar, text="", style="Status.TLabel", anchor="w",
-                                     wraplength=820, justify="left")
-            self.msg_lbl.pack(side="left", fill="x", expand=True, padx=8)
+        def _notebook_label(self):
+            try:
+                return "▤  " + os.path.basename(os.path.normpath(self.root_dir))
+            except Exception:
+                return self.root_dir
+
+        # ---- preview tag styling (re-run on theme flip)
+        def _configure_preview_tags(self, w):
+            w.tag_configure("h1", font=(UI_FAMILY, 18, "bold"), spacing1=6, spacing3=4)
+            w.tag_configure("h2", font=(UI_FAMILY, 15, "bold"), spacing1=5, spacing3=3)
+            w.tag_configure("h3", font=(UI_FAMILY, 13, "bold"), spacing1=4, spacing3=2)
+            w.tag_configure("bold", font=(UI_FAMILY, 11, "bold"))
+            w.tag_configure("italic", font=(UI_FAMILY, 11, "italic"))
+            w.tag_configure("code", font=(MONO_FAMILY, 10),
+                            background=aura.P("surface3"))
+            w.tag_configure("pre", font=(MONO_FAMILY, 10),
+                            background=aura.P("surface3"), lmargin1=12, lmargin2=12)
+            w.tag_configure("quote", foreground=aura.P("muted"),
+                            lmargin1=12, lmargin2=12)
+            w.tag_configure("link", foreground=aura.P("accent"), underline=1)
+
+        # ---- theme: keep the raw-tk preview tags + rendering in sync
+        def set_theme(self, theme):
+            super().set_theme(theme)
+            try:
+                self._configure_preview_tags(self.preview)
+                self._refresh_preview()
+            except Exception:
+                pass
 
         # ---- startup
         def _startup(self):
             self._refresh_tag_filter()
             self._refresh_notes()
             self._reindex(quiet=True)
+            self.after(60, lambda: self.search_entry.focus_set())
 
-        # ---- status helpers
-        def _set_status(self, text, kind="idle"):
-            p = self._pal()
-            color = {"working": p["primary"], "ok": p["ok"], "err": p["err"]}.get(
-                kind, p["muted"])
-            self.status_lbl.configure(text=text, foreground=color)
-
-        def _info(self, message):
-            self.msg_lbl.configure(text=message, foreground=self._pal()["muted"])
-
-        def _error(self, message):
-            self._set_status("error", kind="err")
-            self.msg_lbl.configure(text="✕ " + message, foreground=self._pal()["err"])
-
-        def _ok(self, message):
-            self._set_status("done", kind="ok")
-            self.msg_lbl.configure(text=message, foreground=self._pal()["ok"])
-
-        # ---- background runner
+        # ---- background runner (threaded; marshalled back with self.after)
         def _bg(self, work, on_ok, busy="Working…"):
             if self._busy:
                 return
             self._busy = True
-            self._set_status(busy, kind="working")
+            self.set_status(busy, kind="working")
 
             def run():
                 try:
@@ -566,12 +482,12 @@ def build_app():
             def finish(res, err):
                 self._busy = False
                 if err is not None:
-                    self._error(err)
+                    self.set_error(err)
                     return
                 try:
                     on_ok(res)
                 except Exception as ex:
-                    self._error(f"Post-processing error: {ex}")
+                    self.set_error(f"Post-processing error: {ex}")
 
             threading.Thread(target=run, daemon=True).start()
 
@@ -585,28 +501,31 @@ def build_app():
             try:
                 vault.ensure_notebook(self.root_dir)
             except NoteNestError as ex:
-                self._error(str(ex))
+                self.set_error(str(ex))
                 return
             guiconfig.set_notebook(self.root_dir)
             self._current = None
             self.editor.delete("1.0", "end")
             self.title_lbl.configure(text="No note selected")
+            if hasattr(self, "_nb_caption"):
+                self._nb_caption.configure(text=self._notebook_label())
             self._refresh_tag_filter()
             self._refresh_notes()
             self._reindex(quiet=True)
-            self._info(f"Notebook: {self.root_dir}")
+            self.set_success(f"Notebook: {self.root_dir}")
 
         def _refresh_tag_filter(self):
             try:
                 tags = sorted(links.all_tags(self.root_dir))
             except NoteNestError:
                 tags = []
-            self.tag_combo.configure(values=["(all)"] + ["#" + t for t in tags])
-            if self.tag_var.get() not in (["(all)"] + ["#" + t for t in tags]):
+            values = ["(all)"] + ["#" + t for t in tags]
+            self.tag_combo.configure(values=values)
+            if self.tag_var.get() not in values:
                 self.tag_var.set("(all)")
 
         def _visible_notes(self):
-            query = self.search_var.get().strip()
+            query = self.search_entry.get().strip()
             tag = self.tag_var.get()
             tag = tag[1:] if tag.startswith("#") else None
             if query:
@@ -639,12 +558,12 @@ def build_app():
                 self.note_list.selection_clear(0, "end")
                 self.note_list.selection_set(idx)
                 self.note_list.see(idx)
-            self._set_status(f"{len(names)} note(s)")
+            self.set_status(f"{len(names)} note(s)")
 
         def _schedule_filter(self):
-            if self._preview_job:
-                self.after_cancel(self._preview_job)
-            self._preview_job = self.after(250, self._refresh_notes)
+            if self._filter_job:
+                self.after_cancel(self._filter_job)
+            self._filter_job = self.after(250, self._refresh_notes)
 
         def _on_note_select(self, _e=None):
             sel = self.note_list.curselection()
@@ -660,7 +579,7 @@ def build_app():
             try:
                 text = vault.read_note(self.root_dir, name)
             except NoteNestError as ex:
-                self._error(str(ex))
+                self.set_error(str(ex))
                 return
             self._current = name
             self.editor.delete("1.0", "end")
@@ -680,7 +599,7 @@ def build_app():
             if self._current is None:
                 return
             self._dirty = True
-            self._set_status("editing…")
+            self.set_status("editing…")
             if self._autosave_job:
                 self.after_cancel(self._autosave_job)
             self._autosave_job = self.after(self.AUTOSAVE_MS, self._autosave)
@@ -698,10 +617,10 @@ def build_app():
             try:
                 vault.write_note(self.root_dir, self._current, text)
             except NoteNestError as ex:
-                self._error(str(ex))
+                self.set_error(str(ex))
                 return
             self._dirty = False
-            self._ok(f"Saved {self._current}")
+            self.set_success(f"Saved {self._current}")
             # incremental index update + side panels off the UI thread
             name = self._current
             self._bg(lambda: search.update_note(self.root_dir, name),
@@ -717,25 +636,25 @@ def build_app():
             if not title:
                 return
             if vault.note_exists(self.root_dir, title):
-                self._error(f"A note named {title!r} already exists.")
+                self.set_error(f"A note named {title!r} already exists.")
                 self._select_note(title)
                 return
             try:
                 vault.write_note(self.root_dir, title, f"# {title}\n\n")
             except NoteNestError as ex:
-                self._error(str(ex))
+                self.set_error(str(ex))
                 return
             self._bg(lambda: search.update_note(self.root_dir, title),
                      lambda _r: None, busy="Indexing…")
-            self.search_var.set("")
+            self._clear_search()
             self.tag_var.set("(all)")
             self._refresh_notes()
             self._select_note(title)
-            self._ok(f"Created {title}")
+            self.set_success(f"Created {title}")
 
         def _delete_note(self):
             if self._current is None:
-                self._info("Select a note to delete.")
+                self.set_status("Select a note to delete.")
                 return
             name = self._current
             if not messagebox.askyesno("Delete note",
@@ -745,7 +664,7 @@ def build_app():
                 vault.delete_note(self.root_dir, name)
                 search.remove_note(self.root_dir, name)
             except NoteNestError as ex:
-                self._error(str(ex))
+                self.set_error(str(ex))
                 return
             self._current = None
             self._dirty = False
@@ -754,7 +673,13 @@ def build_app():
             self._clear_preview()
             self._refresh_tag_filter()
             self._refresh_notes()
-            self._ok(f"Deleted {name}")
+            self.set_success(f"Deleted {name}")
+
+        def _clear_search(self):
+            try:
+                self.search_entry.delete(0, "end")
+            except Exception:
+                pass
 
         def _select_note(self, name):
             names = list(self.note_list.get(0, "end"))
@@ -795,7 +720,7 @@ def build_app():
             self._link_seq += 1
             tag = f"lnk-{self._link_seq}"
             self.preview.tag_add(tag, start, end)
-            self.preview.tag_configure(tag, foreground=self._pal()["link"],
+            self.preview.tag_configure(tag, foreground=aura.P("accent"),
                                        underline=1)
             self.preview.tag_bind(tag, "<Button-1>",
                                   lambda e, t=target: self._follow_link(t))
@@ -809,14 +734,14 @@ def build_app():
             try:
                 name = links.resolve_link(self.root_dir, target, create=True)
             except NoteNestError as ex:
-                self._error(str(ex))
+                self.set_error(str(ex))
                 return
             if not name:
-                self._error(f"Could not resolve link: {target}")
+                self.set_error(f"Could not resolve link: {target}")
                 return
             self._bg(lambda: search.update_note(self.root_dir, name),
                      lambda _r: None, busy="Indexing…")
-            self.search_var.set("")
+            self._clear_search()
             self._refresh_tag_filter()
             self._refresh_notes()
             self._select_note(name)
@@ -848,35 +773,36 @@ def build_app():
         def _reindex(self, quiet=False):
             def done(n):
                 if not quiet:
-                    self._ok(f"Reindexed {n} note(s).")
+                    self.set_success(f"Reindexed {n} note(s).")
                 else:
-                    self._set_status("Ready")
+                    self.set_status("Ready")
             self._bg(lambda: search.reindex(self.root_dir), done, busy="Indexing…")
 
-        # ---- About
-        def _about(self):
-            win = tk.Toplevel(self)
-            win.title("About NoteNest")
-            win.configure(bg=self._pal()["bg"])
-            win.resizable(False, False)
-            frm = ttk.Frame(win, style="TFrame", padding=18)
-            frm.pack(fill="both", expand=True)
-            ttk.Label(frm, text="NoteNest", style="Header.TLabel").pack(anchor="w")
-            ttk.Label(frm, text=f"Version {APP_VERSION}",
-                      style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
-            ttk.Label(frm, style="TLabel", justify="left", wraplength=380,
-                      text="A fast, fully-offline Markdown knowledge base — "
-                           "wiki-links, backlinks, tags and full-text search over "
-                           "plain files you own.\n\n"
-                           "100% AI-built, open source, published on QuickOpen.\n"
-                           "Nothing is ever uploaded anywhere.").pack(anchor="w")
-            ttk.Label(frm, style="Muted.TLabel", justify="left", wraplength=380,
-                      text="Licensed under Apache-2.0. Built on permissive "
-                           "libraries: python-markdown and Whoosh.").pack(
-                anchor="w", pady=(8, 4))
-            ttk.Button(frm, text="Close", command=win.destroy).pack(anchor="e")
-            win.transient(self)
-            win.grab_set()
+        # =================================================================
+        # About section
+        # =================================================================
+        def _build_about(self, frame):
+            card = aura.Card(frame, title="About NoteNest")
+            card.pack(fill="x")
+            aura.Heading(card.body, APP_NAME).pack(anchor="w")
+            aura.Caption(card.body, f"Version {APP_VERSION}").pack(
+                anchor="w", pady=(0, 10))
+            ctk.CTkLabel(
+                card.body, font=aura.font(), justify="left", anchor="w",
+                wraplength=560,
+                text="A fast, fully-offline Markdown knowledge base — "
+                     "wiki-links, backlinks, tags and full-text search over "
+                     "plain files you own.\n\n"
+                     "100% AI-built, open source, published on QuickOpen. "
+                     "Nothing is ever uploaded anywhere.").pack(anchor="w")
+            aura.Caption(card.body,
+                         "Licensed under Apache-2.0. Built on python-markdown "
+                         "and Whoosh (BSD), and CustomTkinter (MIT).").pack(
+                anchor="w", pady=(10, 4))
+            aura.AuraButton(card.body, "Project page: quickopen.ai",
+                            kind="ghost",
+                            command=lambda: open_with_default_app(
+                                PROJECT_URL)).pack(anchor="w", pady=(6, 0))
 
         # ---- shutdown
         def _on_close(self):
@@ -893,8 +819,9 @@ def main():
     """Entry point: build the root window and run.  Degrades on headless hosts.
 
     Importing this module does nothing; only this function creates a Tk root.
-    With no display (e.g. a server) it prints a friendly note and returns 0
-    instead of raising, so headless callers stay clean.
+    With no display (e.g. a server) or without customtkinter installed, it
+    prints a friendly note and returns 0 instead of raising, so headless
+    callers stay clean.
     """
     try:
         import tkinter as tk
@@ -906,6 +833,10 @@ def main():
     try:
         App = build_app()
         app = App()
+    except ImportError as exc:
+        print(f"{APP_NAME}: the GUI needs the 'customtkinter' package "
+              f"({exc}). Install it with:  pip install customtkinter")
+        return 0
     except tk.TclError as exc:
         print(f"{APP_NAME}: no graphical display available — cannot start the "
               f"GUI here ({exc}). This app is intended for the Windows desktop.")
