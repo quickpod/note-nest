@@ -24,6 +24,7 @@ jobs:
           --add-data "note-nest.ico;."
           --collect-submodules whoosh
           --collect-all customtkinter
+          --add-data "assets;assets"
           note_nest_app.py
       - name: Stage installer inputs
         shell: pwsh
