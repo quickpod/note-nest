@@ -48,10 +48,11 @@ import time
 # that merely importing this module (packaging, headless CI) never fails.
 
 APP_NAME = "NoteNest"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 WINDOW_TITLE = "NoteNest — by QuickOpen (quickopen.ai)"
 PROJECT_URL = "https://quickopen.ai"
-ACCENT = "#17914b"      # publish/specs/note-nest.json "accent": [23, 145, 75]
+ACCENT = "#5b86f7"      # Aura brand accent (owner-approved 2026-08-16; the old
+                        # per-app green #17914b was a legacy scaffold accent)
 
 VIEW_MODES = ("Write", "Split", "Read")
 SORT_EDITED = "Recently edited"

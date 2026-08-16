@@ -20,6 +20,6 @@ from __future__ import annotations
 
 from .errors import NoteNestError
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 __all__ = ["NoteNestError", "vault", "links", "render", "search", "guiconfig"]
