@@ -1,0 +1,4 @@
+{
+  "tagline": "A local Markdown knowledge base — pinned notes, wiki-links, backlinks, tags, quick switcher and instant full-text search.",
+  "description": "Write notes in Markdown and keep them as plain files you own. NoteNest 1.1 adopts the layout of leading notes apps while staying simple: a tag sidebar with one-click filtering, a note list with pinned notes on top and edited-ago stamps, and Write / Split / Read views with live preview. Link notes with [[wiki-links]] (renames update links in other notes), see backlinks and outgoing links per note, jump anywhere with the Ctrl+P quick switcher, and find anything with instant full-text search. A formatting bar and Ctrl+B/I/K shortcuts cover everyday Markdown; autosave keeps you writing. Follows the system Aura Dark/Light theme live, with a Settings dialog (Ctrl+,) for notebook folder, editor font size and theme. Fully offline — nothing is ever uploaded."
+}

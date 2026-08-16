@@ -19,7 +19,9 @@ import os
 APP_DIRNAME = "NoteNest"
 CONFIG_NAME = "config.json"
 MAX_RECENT = 10
-VALID_THEMES = ("light", "dark")
+# "system" follows the OS Aura Dark/Light live (the fresh-install default).
+VALID_THEMES = ("system", "light", "dark")
+FONT_SIZES = (10, 11, 12, 13, 14, 16)
 
 
 def config_dir():
@@ -52,7 +54,8 @@ def index_root():
 
 
 def _defaults():
-    return {"theme": "light", "recent": [], "notebook": None}
+    return {"theme": "system", "recent": [], "notebook": None,
+            "font_size": 11, "pins": {}}
 
 
 def load():
@@ -71,6 +74,14 @@ def load():
             nb = data.get("notebook")
             if isinstance(nb, str):
                 cfg["notebook"] = nb
+            fs = data.get("font_size")
+            if isinstance(fs, int) and 8 <= fs <= 24:
+                cfg["font_size"] = fs
+            pins = data.get("pins")
+            if isinstance(pins, dict):
+                cfg["pins"] = {k: [n for n in v if isinstance(n, str)]
+                               for k, v in pins.items()
+                               if isinstance(k, str) and isinstance(v, list)}
     except Exception:
         pass  # missing/corrupt -> defaults; never fatal
     return cfg
@@ -80,10 +91,17 @@ def save(cfg):
     """Persist *cfg* (best-effort; failures are swallowed)."""
     try:
         os.makedirs(config_dir(), exist_ok=True)
+        fs = cfg.get("font_size")
+        pins = cfg.get("pins")
         clean = {
-            "theme": cfg.get("theme") if cfg.get("theme") in VALID_THEMES else "light",
+            "theme": cfg.get("theme") if cfg.get("theme") in VALID_THEMES else "system",
             "recent": [p for p in cfg.get("recent", []) if isinstance(p, str)][:MAX_RECENT],
             "notebook": cfg.get("notebook") if isinstance(cfg.get("notebook"), str) else None,
+            "font_size": fs if isinstance(fs, int) and 8 <= fs <= 24 else 11,
+            "pins": {k: [n for n in v if isinstance(n, str)]
+                     for k, v in pins.items()
+                     if isinstance(k, str) and isinstance(v, list)}
+                    if isinstance(pins, dict) else {},
         }
         tmp = config_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -94,7 +112,9 @@ def save(cfg):
 
 
 def get_theme():
-    return load().get("theme", "light")
+    """The persisted theme preference: "system" (follow the OS), "light" or
+    "dark".  Fresh installs return "system" so the app follows Aura live."""
+    return load().get("theme", "system")
 
 
 def set_theme(theme):
@@ -119,6 +139,61 @@ def set_notebook(path):
         cfg["notebook"] = path
     save(cfg)
     add_recent(path)
+
+
+def get_font_size():
+    return load().get("font_size", 11)
+
+
+def set_font_size(size):
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        return
+    if not 8 <= size <= 24:
+        return
+    cfg = load()
+    cfg["font_size"] = size
+    save(cfg)
+
+
+# ---------------------------------------------------------------------------
+# pinned notes (stored per notebook, keyed by the notebook's absolute path;
+# notes themselves stay plain .md files -- pinning is app metadata only)
+# ---------------------------------------------------------------------------
+def get_pins(root):
+    """The ordered list of pinned note names for notebook *root*."""
+    try:
+        key = os.path.abspath(root)
+    except Exception:
+        key = str(root)
+    return list(load().get("pins", {}).get(key, []))
+
+
+def set_pinned(root, name, pinned):
+    """Pin (or unpin) *name* in notebook *root*; returns the new pinned bool."""
+    try:
+        key = os.path.abspath(root)
+    except Exception:
+        key = str(root)
+    cfg = load()
+    pins = cfg.setdefault("pins", {})
+    cur = [n for n in pins.get(key, []) if n != name]
+    if pinned:
+        cur.insert(0, name)
+    if cur:
+        pins[key] = cur
+    else:
+        pins.pop(key, None)
+    save(cfg)
+    return bool(pinned)
+
+
+def rename_pin(root, old, new):
+    """Keep a pinned note pinned across a rename."""
+    if old in get_pins(root):
+        set_pinned(root, old, False)
+        set_pinned(root, new, True)
 
 
 def get_recent():

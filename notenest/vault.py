@@ -92,6 +92,14 @@ def list_notes(root):
     return sorted(names)
 
 
+def note_mtime(root, name):
+    """Last-modified time (epoch seconds) of a note, or ``None`` if unknown."""
+    try:
+        return os.path.getmtime(note_path(root, name))
+    except (NoteNestError, OSError):
+        return None
+
+
 def note_exists(root, name):
     try:
         return os.path.isfile(note_path(root, name))
